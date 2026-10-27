@@ -1,0 +1,13 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.txt
+crash.log
+# Los lock files se versionan solo en las raíces (cells/, bootstrap/), no en los módulos.
+cloud/modules/**/.terraform.lock.hcl
+
+# Manifiestos renderizados en local
+gitops-multicell/rendered/

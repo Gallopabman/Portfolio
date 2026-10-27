@@ -1,0 +1,132 @@
+name: cloud
+
+on:
+  pull_request:
+    paths: ["cloud/**", ".github/workflows/cloud.yml"]
+  push:
+    branches: [main]
+    paths: ["cloud/**"]
+  workflow_dispatch:
+    inputs:
+      cell:
+        description: Celda a aplicar
+        type: choice
+        options: [dev-us-1, staging-us-1, prod-us-1, prod-eu-1]
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: 1.12.2
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # Sin credenciales: formato, lint, tests con provider simulado, validate y escaneo de seguridad.
+  static:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cloud
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Las variables de cada celda son copia exacta de modules/cell
+        run: |
+          for d in cells/*/; do
+            diff <(grep -v '^#' modules/cell/variables.tf | sed '/./,$!d') \
+                 <(grep -v '^#' "$d/variables.tf" | sed '/./,$!d') \
+              || { echo "::error file=$d/variables.tf::difiere de modules/cell/variables.tf"; exit 1; }
+          done
+
+      - name: terraform test (provider simulado)
+        run: |
+          for m in modules/*/; do
+            [ -d "$m/tests" ] || continue
+            echo "::group::$m"
+            terraform -chdir="$m" init -backend=false -input=false >/dev/null
+            terraform -chdir="$m" test
+            echo "::endgroup::"
+          done
+
+      - name: terraform validate de cada celda
+        run: |
+          for c in cells/*/ bootstrap/; do
+            terraform -chdir="$c" init -backend=false -input=false >/dev/null
+            terraform -chdir="$c" validate
+          done
+
+      - uses: terraform-linters/setup-tflint@v4
+      - name: tflint
+        run: tflint --init && tflint --recursive --minimum-failure-severity=warning
+
+      - name: Escaneo de configuración (trivy)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: config
+          scan-ref: cloud
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  # plan de cada celda en los PR, con la service account de solo lectura (Workload Identity
+  # Federation, sin llaves). Cada celda tiene su proyecto y su pool de WIF: los datos salen de las
+  # variables del environment <celda>-plan (GCP_WIF_PROVIDER, GCP_PROJECT), que no exige aprobación.
+  # Se activa con la variable de repo CLOUD_PLAN_ENABLED=true una vez hecho el bootstrap.
+  plan:
+    if: github.event_name == 'pull_request' && vars.CLOUD_PLAN_ENABLED == 'true'
+    needs: static
+    runs-on: ubuntu-24.04
+    environment: ${{ matrix.cell }}-plan
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: [dev-us-1, staging-us-1, prod-us-1, prod-eu-1]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: terraform-plan@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com
+      - name: terraform plan
+        working-directory: cloud/cells/${{ matrix.cell }}
+        run: |
+          terraform init -input=false
+          terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan | tee plan.txt
+          { echo "### plan ${{ matrix.cell }}"; echo '```'; grep -E '^(Plan:|No changes)' plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # apply manual, una celda por vez. Cada celda es un GitHub environment con sus variables
+  # (GCP_WIF_PROVIDER, GCP_PROJECT); los de prod exigen aprobación de un revisor antes de que el
+  # job arranque.
+  apply:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.cell }}
+    concurrency: apply-${{ inputs.cell }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: terraform-apply@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com
+      - name: terraform apply
+        working-directory: cloud/cells/${{ inputs.cell }}
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -lock-timeout=5m -auto-approve

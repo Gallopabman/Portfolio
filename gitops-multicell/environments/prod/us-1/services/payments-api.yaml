@@ -4,6 +4,6 @@ image:
 secrets:
   items:
     - env: PROVIDER_API_KEY
-      remoteKey: payments-api-provider-key
+      remoteKey: payments-api-provider-api-key
 # Los pagos tienen conexiones largas con el proveedor: más tiempo para drenar.
 terminationGracePeriodSeconds: 90

@@ -7,9 +7,8 @@ serviceAccount:
 env:
   PAYMENTS_URL: "http://payments-api.apps.svc:8080"
   CLOUD_REGION: "{{ .Values.cell.region }}"
+# La base usa autenticación IAM con la identidad del pod (ver cloud/modules/workload): sin contraseña.
 secrets:
   items:
-    - env: DB_PASSWORD
-      remoteKey: orders-api-db-password
     - env: JWT_SIGNING_KEY
       remoteKey: orders-api-jwt-signing-key
