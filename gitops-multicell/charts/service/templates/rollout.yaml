@@ -1,0 +1,98 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "service.name" . }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" . | nindent 6 }}
+  strategy:
+    canary:
+      stableService: {{ include "service.name" . }}
+      canaryService: {{ include "service.name" . }}-canary
+      steps:
+        {{- range $i, $step := .Values.rollout.canary.steps }}
+        - {{ toYaml $step | indent 10 | trim }}
+        {{- if and (eq $i 0) $.Values.rollout.analysis.enabled }}
+        - analysis:
+            templates:
+              - templateName: {{ include "service.name" $ }}-success-rate
+            args:
+              - name: service
+                value: {{ include "service.name" $ }}-canary
+        {{- end }}
+        {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "service.labels" . | nindent 8 }}
+      annotations:
+        # Fuerza un rollout cuando cambia la lista de secretos montados.
+        checksum/secrets: {{ toJson .Values.secrets.items | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "service.name" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: {{ include "service.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+          env:
+            - name: CELL
+              value: {{ .Values.cell.name | quote }}
+            - name: ENVIRONMENT
+              value: {{ .Values.cell.env | quote }}
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ tpl (toString $v) $ | quote }}
+            {{- end }}
+            {{- range .Values.secrets.items }}
+            - name: {{ .env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "service.secretName" $ }}
+                  key: {{ .env }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

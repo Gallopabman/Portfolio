@@ -1,0 +1,17 @@
+image:
+  repository: ghcr.io/gallopabman/orders-api
+  tag: "7a2b9d4"
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: "{{ .Values.name }}@{{ .Values.cloud.project }}.iam.gserviceaccount.com"
+env:
+  PAYMENTS_URL: "http://payments-api.apps.svc:8080"
+  CLOUD_REGION: "{{ .Values.cell.region }}"
+secrets:
+  items:
+    - env: DB_PASSWORD
+      remoteKey: orders-api-db-password
+    - env: JWT_SIGNING_KEY
+      remoteKey: orders-api-jwt-signing-key
+autoscaling:
+  maxReplicas: 30

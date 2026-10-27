@@ -1,0 +1,6 @@
+# Lo que distingue a esta celda de las demás del mismo ambiente: región y proyecto de nube.
+# Los datos de cada celda quedan en su región (residencia de datos).
+cell:
+  region: us-east1
+cloud:
+  project: stg-platform-1234

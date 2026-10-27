@@ -1,0 +1,27 @@
+{{- if .Values.rollout.analysis.enabled }}
+# Gate del canary: si la tasa de éxito del canary cae bajo el umbral, Argo Rollouts aborta y
+# vuelve todo el tráfico a la versión estable, sin intervención humana.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "service.name" . }}-success-rate
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: service
+  metrics:
+    - name: success-rate
+      interval: {{ .Values.rollout.analysis.interval }}
+      count: {{ .Values.rollout.analysis.count }}
+      failureLimit: {{ .Values.rollout.analysis.failureLimit }}
+      # Sin tráfico el resultado es NaN: se toma como éxito para no frenar despliegues de madrugada.
+      successCondition: "isNaN(result[0]) || result[0] >= {{ .Values.rollout.analysis.successRate }}"
+      provider:
+        prometheus:
+          address: {{ .Values.rollout.analysis.prometheusAddress }}
+          query: |
+            sum(rate(http_server_requests_seconds_count{service="{{ "{{" }}args.service{{ "}}" }}",status!~"5.."}[2m]))
+            /
+            sum(rate(http_server_requests_seconds_count{service="{{ "{{" }}args.service{{ "}}" }}"}[2m]))
+{{- end }}

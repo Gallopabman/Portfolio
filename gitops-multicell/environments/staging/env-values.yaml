@@ -1,0 +1,8 @@
+# Staging replica la topología de prod a menor escala, con el gate de análisis activo:
+# un canary malo se aborta acá antes de llegar a prod.
+replicas: 2
+rollout:
+  analysis:
+    enabled: true
+env:
+  LOG_LEVEL: info

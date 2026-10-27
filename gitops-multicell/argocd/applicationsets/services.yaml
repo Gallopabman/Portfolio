@@ -1,0 +1,70 @@
+# Un solo ApplicationSet genera una Application por cada (ambiente, celda, servicio).
+#
+# La fuente de verdad es la estructura de carpetas:
+#   environments/<env>/<cell>/services/<servicio>.yaml
+# Sumar un servicio a una celda = agregar un archivo. Sumar una celda = agregar una carpeta y
+# registrar su cluster en ArgoCD con ese nombre. No hay que tocar YAML de ArgoCD.
+#
+# Los values se apilan de lo general a lo particular:
+#   chart  ->  env-values.yaml  ->  cell-values.yaml  ->  services/<servicio>.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/Gallopabman/Portfolio.git
+        revision: main
+        files:
+          - path: "gitops-multicell/environments/*/*/services/*.yaml"
+  template:
+    metadata:
+      # p.ej. prod-eu-1-orders-api
+      name: '{{ index .path.segments 3 }}-{{ trimSuffix ".yaml" .path.filename }}'
+      labels:
+        env: '{{ index .path.segments 2 }}'
+        cell: '{{ index .path.segments 3 }}'
+        service: '{{ trimSuffix ".yaml" .path.filename }}'
+    spec:
+      project: '{{ if eq (index .path.segments 2) "prod" }}prod{{ else }}nonprod{{ end }}'
+      sources:
+        - repoURL: https://github.com/Gallopabman/Portfolio.git
+          targetRevision: main
+          path: gitops-multicell/charts/service
+          helm:
+            releaseName: '{{ trimSuffix ".yaml" .path.filename }}'
+            valueFiles:
+              - '$values/gitops-multicell/environments/{{ index .path.segments 2 }}/env-values.yaml'
+              - '$values/gitops-multicell/environments/{{ index .path.segments 2 }}/{{ index .path.segments 3 }}/cell-values.yaml'
+              - '$values/{{ .path.path }}/{{ .path.filename }}'
+            ignoreMissingValueFiles: true
+            parameters:
+              - name: name
+                value: '{{ trimSuffix ".yaml" .path.filename }}'
+              - name: cell.name
+                value: '{{ index .path.segments 3 }}'
+              - name: cell.env
+                value: '{{ index .path.segments 2 }}'
+        - repoURL: https://github.com/Gallopabman/Portfolio.git
+          targetRevision: main
+          ref: values
+      destination:
+        # El cluster de cada celda está registrado en ArgoCD como <env>-<cell>.
+        name: '{{ index .path.segments 2 }}-{{ index .path.segments 3 }}'
+        namespace: apps
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+  # Fuera de prod: sync automático con prune y self-heal. En prod: sync manual, siempre.
+  templatePatch: |
+    {{- if ne (index .path.segments 2) "prod" }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}

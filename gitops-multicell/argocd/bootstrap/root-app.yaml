@@ -1,0 +1,23 @@
+# Única pieza que se aplica a mano (kubectl apply -f), una sola vez por instancia de ArgoCD.
+# Desde acá todo lo demás se gestiona desde git: proyectos y ApplicationSets.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Gallopabman/Portfolio.git
+    targetRevision: main
+    path: gitops-multicell/argocd
+    directory:
+      recurse: true
+      exclude: "bootstrap/*"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

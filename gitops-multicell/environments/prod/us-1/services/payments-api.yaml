@@ -1,0 +1,9 @@
+image:
+  repository: ghcr.io/gallopabman/payments-api
+  tag: "1e8f5c3"
+secrets:
+  items:
+    - env: PROVIDER_API_KEY
+      remoteKey: payments-api-provider-key
+# Los pagos tienen conexiones largas con el proveedor: más tiempo para drenar.
+terminationGracePeriodSeconds: 90

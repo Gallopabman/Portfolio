@@ -1,0 +1,106 @@
+# Defaults del chart. Cada capa los pisa en este orden (ver argocd/applicationsets/services.yaml):
+#   values.yaml  ->  environments/<env>/env-values.yaml  ->  <cell>/cell-values.yaml  ->  <cell>/services/<svc>.yaml
+
+# Nombre lógico del servicio. Lo fija el ApplicationSet a partir del nombre del archivo.
+name: ""
+
+# Datos de la celda donde corre el release. Los fija el ApplicationSet a partir de la ruta.
+cell:
+  name: ""
+  env: ""
+  region: ""
+
+image:
+  repository: ""
+  # Tag inmutable (SHA corto del commit). Nunca `latest`: con un tag móvil, dos syncs de la misma
+  # revisión de git pueden terminar corriendo código distinto. El chart falla si viene vacío o en latest.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicas: 2
+
+containerPort: 8080
+
+service:
+  port: 8080
+
+# Variables no secretas, como MAPA y no como lista: así cada capa (ambiente, celda, servicio)
+# suma o pisa claves sin borrar las de las capas anteriores. Los valores admiten plantillas
+# de Helm, p.ej. "{{ .Values.cell.region }}".
+env: {}
+#  LOG_LEVEL: info
+
+# Secretos: cada entrada se sincroniza desde el gestor de secretos de la nube (External Secrets
+# Operator) a un Secret de Kubernetes y se monta como variable de entorno. El repositorio nunca
+# contiene valores.
+secrets:
+  storeRef:
+    kind: ClusterSecretStore
+    name: cloud-secret-manager
+  refreshInterval: 1h
+  items: []
+#  - env: DB_PASSWORD          # variable en el contenedor
+#    remoteKey: orders-db-pass # nombre del secreto en el gestor
+
+# Identidad de nube del pod (Workload Identity / IRSA). Sin llaves de service account en el cluster.
+serviceAccount:
+  create: true
+  # Admiten plantillas: "{{ .Values.name }}@{{ .Values.cloud.project }}.iam.gserviceaccount.com"
+  annotations: {}
+#   iam.gke.io/gcp-service-account: orders-api@my-project.iam.gserviceaccount.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+probes:
+  readiness:
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  liveness:
+    path: /health
+    initialDelaySeconds: 20
+    periodSeconds: 20
+
+# Tiempo para drenar conexiones largas (SSE, websockets) antes de matar el pod.
+terminationGracePeriodSeconds: 30
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Estrategia de despliegue progresivo.
+rollout:
+  canary:
+    # Si `analysis.enabled`, se inserta un paso de análisis después del primer escalón.
+    steps:
+      - setWeight: 20
+      - pause: { duration: 60s }
+      - setWeight: 50
+      - pause: { duration: 60s }
+  analysis:
+    enabled: false
+    prometheusAddress: http://prometheus-server.monitoring.svc:80
+    # Tasa mínima de respuestas no-5xx para promover el canary.
+    successRate: 0.99
+    interval: 1m
+    count: 5
+    failureLimit: 1
+
+# Datos de la nube de la celda (los define cell-values.yaml).
+cloud:
+  project: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

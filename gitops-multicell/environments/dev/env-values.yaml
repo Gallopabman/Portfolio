@@ -1,0 +1,15 @@
+# Defaults de dev: barato y rápido. Una réplica, sin análisis, canary corto.
+replicas: 1
+podDisruptionBudget:
+  enabled: false
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+rollout:
+  canary:
+    steps:
+      - setWeight: 50
+      - pause: { duration: 10s }
+env:
+  LOG_LEVEL: debug

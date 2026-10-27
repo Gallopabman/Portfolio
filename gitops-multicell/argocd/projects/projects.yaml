@@ -1,0 +1,55 @@
+# Un AppProject por ambiente: acota a qué clusters puede desplegar cada uno y qué recursos de
+# cluster puede crear. Un error en un values de dev no puede apuntar a un cluster de prod.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nonprod
+  namespace: argocd
+spec:
+  description: Ambientes de desarrollo y staging
+  sourceRepos:
+    - https://github.com/Gallopabman/Portfolio.git
+  destinations:
+    # Los clusters se registran en ArgoCD como <ambiente>-<celda> (dev-us-1, prod-eu-1, ...).
+    - name: "dev-*"
+      namespace: "apps"
+    - name: "staging-*"
+      namespace: "apps"
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: argoproj.io, kind: Rollout }
+    - { group: argoproj.io, kind: AnalysisTemplate }
+    - { group: external-secrets.io, kind: ExternalSecret }
+    - { group: autoscaling, kind: HorizontalPodAutoscaler }
+    - { group: policy, kind: PodDisruptionBudget }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: prod
+  namespace: argocd
+spec:
+  description: Producción. Sync manual; ventanas de sync bloquean despliegues fuera de horario.
+  sourceRepos:
+    - https://github.com/Gallopabman/Portfolio.git
+  destinations:
+    - name: "prod-*"
+      namespace: "apps"
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: argoproj.io, kind: Rollout }
+    - { group: argoproj.io, kind: AnalysisTemplate }
+    - { group: external-secrets.io, kind: ExternalSecret }
+    - { group: autoscaling, kind: HorizontalPodAutoscaler }
+    - { group: policy, kind: PodDisruptionBudget }
+  syncWindows:
+    # Nada de syncs viernes desde las 18 hasta el lunes 8 (UTC), salvo override manual.
+    - kind: deny
+      schedule: "0 18 * * 5"
+      duration: 62h
+      applications: ["*"]
+      manualSync: true

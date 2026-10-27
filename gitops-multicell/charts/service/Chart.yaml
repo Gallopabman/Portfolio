@@ -1,0 +1,9 @@
+apiVersion: v2
+name: service
+description: >-
+  Chart genérico para un microservicio HTTP: Argo Rollouts con canary y análisis automático,
+  secretos desde un gestor externo (External Secrets), identidad de nube por service account,
+  autoescalado y presupuesto de disrupción.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
